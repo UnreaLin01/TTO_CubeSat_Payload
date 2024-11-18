@@ -17,7 +17,7 @@ float R1 = 160;   // Reading data point 2
 
 //#if defined(ARDUINO_ARCH_STM32F0) || defined(ARDUINO_ARCH_STM32F1) || defined(ARDUINO_ARCH_STM32F3) || defined(ARDUINO_ARCH_STM32F4) || defined(ARDUINO_ARCH_STM32L4)
 #if defined(STM32F0) || defined(STM32F1) || defined(STM32F3) || defined(STM32F4) || defined(STM32L4)
-float T2 = 25;    // Temperature data point 1
+float T2 = 25.9;    // Temperature data point 1
 float R2 = 661;   // Reading data point 1
 float T1 = 15.5;  // Temperature data point 2
 float R1 = 695;   // Reading data point 2
@@ -30,6 +30,7 @@ void blink_setup();
 void blink(int length);
 void led_set(int ledPin, bool state);
 int read_analog();
+void temp_avg();
 
 
 Adafruit_BME280 bme;
@@ -37,6 +38,8 @@ MPU6050 mpu6050(Wire);
 
 //HardwareSerial Serial1(PA10, PA9);  // Uart to raspberry pi zero.
 //HardwareSerial Serial2(PA3, PA2); // External uart pin
+
+float temps[11] = {0};
 
 long timer = 0;
 int bmePresent;
@@ -163,11 +166,11 @@ void loop() {
     Serial1.print(" ");
     Serial1.print(mpu6050.getAccZ());
 
-    Temp = T1 + (read_analog() - R1) * ((T2 - T1) / (R2 - R1));
+    //Temp = T1 + (read_analog() - R1) * ((T2 - T1) / (R2 - R1));
     Sensor2 = analogRead(PA4) * 3.3 / 4095;
 
     Serial1.print(" XS ");
-    Serial1.print(Temp);
+    Serial1.print(Temp/10);
     Serial1.print(" ");
     Serial1.println(Sensor2);
 
@@ -244,16 +247,22 @@ void loop() {
       Serial.print(" ");
       Serial.print(mpu6050.getAccZ());
 
-      Temp = T1 + (read_analog() - R1) * ((T2 - T1) / (R2 - R1));
+      //Temp = T1 + (read_analog() - R1) * ((T2 - T1) / (R2 - R1));
       //Temp = (analogRead(PA7));
       Sensor2 = analogRead(PA4) * 3.3 / 4095;
 
       Serial.print(" XS ");
-      Serial.print(Temp);
+      Serial.print(Temp/10);
       Serial.print(" ");
+      #if defined(DEBUG_MSG)
+        Serial.print(read_analog());
+        Serial.print(" ");
+      #endif
+      
       Serial.println(Sensor2);
     }
   }
+  temp_avg();
   delay(100);
 }
 
@@ -331,4 +340,13 @@ int read_analog(){
   sensorValue = analogRead(PA7);
 #endif
   return (sensorValue);
+}
+
+void temp_avg(){
+  temps[10] = T1 + (read_analog() - R1) * ((T2 - T1) / (R2 - R1));
+  //temps[10] = read_analog();
+  Temp +=(temps[10]-temps[0]);
+  for(uint8_t i =0;i<10;i++)
+    temps[i]=temps[i+1];
+  
 }
