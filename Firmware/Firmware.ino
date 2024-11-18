@@ -4,19 +4,21 @@
 #include <MPU6050_tockn.h>
 #include <EEPROM.h>
 
-#define SEALEVELPRESSURE_HPA (1013.25)
 
-#if defined __AVR_ATmega32U4__
-float T2 = 26.3;  // Temperature data point 1
-float R2 = 167;   // Reading data point 1
-float T1 = 2;     // Temperature data point 2
-float R1 = 179;   // Reading data point 2
+#define SEALEVELPRESSURE_HPA (1013.25)
+#define DEBGU_MSG 1
+
+#if defined __AVR_ATmega32U4__ 
+float T2 = 25.9;  // Temperature data point 1
+float R2 = 165;   // Reading data point 1
+float T1 = 30.7;     // Temperature data point 2
+float R1 = 160;   // Reading data point 2
 #endif
 
 //#if defined(ARDUINO_ARCH_STM32F0) || defined(ARDUINO_ARCH_STM32F1) || defined(ARDUINO_ARCH_STM32F3) || defined(ARDUINO_ARCH_STM32F4) || defined(ARDUINO_ARCH_STM32L4)
 #if defined(STM32F0) || defined(STM32F1) || defined(STM32F3) || defined(STM32F4) || defined(STM32L4)
 float T2 = 25;    // Temperature data point 1
-float R2 = 671;   // Reading data point 1
+float R2 = 661;   // Reading data point 1
 float T1 = 15.5;  // Temperature data point 2
 float R1 = 695;   // Reading data point 2
 #endif
@@ -119,6 +121,7 @@ void setup() {
       Serial.println(((float)eeprom_word_read(3)) / 100.0, DEC);
     #endif
   }
+  analogReadResolution(12);
 
   #if defined(DEBUG_MSG)
     Serial.println("STM Payload Done Setup");
@@ -161,7 +164,7 @@ void loop() {
     Serial1.print(mpu6050.getAccZ());
 
     Temp = T1 + (read_analog() - R1) * ((T2 - T1) / (R2 - R1));
-    Sensor2 = analogRead(PA4) * 3.3 / 1024.0;
+    Sensor2 = analogRead(PA4) * 3.3 / 4095;
 
     Serial1.print(" XS ");
     Serial1.print(Temp);
@@ -242,12 +245,13 @@ void loop() {
       Serial.print(mpu6050.getAccZ());
 
       Temp = T1 + (read_analog() - R1) * ((T2 - T1) / (R2 - R1));
-      Sensor2 = analogRead(PA4) * 3.3 / 1024.0;
+      //Temp = (analogRead(PA7));
+      Sensor2 = analogRead(PA4) * 3.3 / 4095;
 
       Serial.print(" XS ");
       Serial.print(Temp);
       Serial.print(" ");
-      Serial.print(Sensor2);
+      Serial.println(Sensor2);
     }
   }
   delay(100);
