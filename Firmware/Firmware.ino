@@ -4,85 +4,71 @@
 #include <MPU6050_tockn.h>
 #include <EEPROM.h>
 
+//#define DEBUG_MSG
 
-#define SEALEVELPRESSURE_HPA (1013.25)
-#define DEBGU_MSG 1
+#define RX_LED 17
+#define BLUE_LED 8
+#define GREEN_LED 9
+#define SEA_LEVEL_PRESSURE 1013.25
 
-#if defined __AVR_ATmega32U4__ 
-float T2 = 25.9;  // Temperature data point 1
-float R2 = 165;   // Reading data point 1
-float T1 = 30.7;     // Temperature data point 2
-float R1 = 160;   // Reading data point 2
-#endif
-
-//#if defined(ARDUINO_ARCH_STM32F0) || defined(ARDUINO_ARCH_STM32F1) || defined(ARDUINO_ARCH_STM32F3) || defined(ARDUINO_ARCH_STM32F4) || defined(ARDUINO_ARCH_STM32L4)
-#if defined(STM32F0) || defined(STM32F1) || defined(STM32F3) || defined(STM32F4) || defined(STM32L4)
-float T2 = 25.9;    // Temperature data point 1
-float R2 = 661;   // Reading data point 1
-float T1 = 15.5;  // Temperature data point 2
-float R1 = 695;   // Reading data point 2
-#endif
-
-
-void eeprom_word_write(int addr, int val);
-short eeprom_word_read(int addr);
-void blink_setup();
-void blink(int length);
-void led_set(int ledPin, bool state);
-int read_analog();
-void temp_avg();
-
+#define T2  25.9  // Temperature data point 1
+#define R2  661.0 // Reading data point 1
+#define T1  15.5  // Temperature data point 2
+#define R1  695.0 // Reading data point 2
 
 Adafruit_BME280 bme;
 MPU6050 mpu6050(Wire);
 
-//HardwareSerial Serial1(PA10, PA9);  // Uart to raspberry pi zero.
-//HardwareSerial Serial2(PA3, PA2); // External uart pin
-
-float temps[11] = {0};
-
-long timer = 0;
-int bmePresent;
-int RXLED = 17;  // The RX LED has a defined Arduino pin
-int greenLED = 9;
-int blueLED = 8;
-int Sensor1 = 0;
-float Sensor2 = 0;
-int first_time = true;
-int first_read = true;
-
-float Temp;
-float rest;
-
+void led_setup();
+void led_blink(int length);
+void led_set(int led_pin, bool state);
 void eeprom_word_write(int addr, int val);
 short eeprom_word_read(int addr);
+void update_sensors();
+
+static uint8_t bme_present;
+static float bme_temperature;
+static float bme_pressure;
+static float bme_altitude;
+static float bme_humidity;
+
+static float mpu_gyro_x;
+static float mpu_gyro_y;
+static float mpu_gyro_z;
+static float mpu_acc_x;
+static float mpu_acc_y;
+static float mpu_acc_z;
+
+static float diode_temp;
+static float voltage;
 
 void setup() {
+  Serial.begin(115200); // Uart through USB
+  Serial1.begin(115200); // Uart to raspberry pi zero.
 
-  Serial.begin(115200);
-  Serial1.begin(115200);
+  analogReadResolution(12);
 
   #if defined(DEBUG_MSG)
     Serial.println("STM Payload Starting");
   #endif
 
-  blink_setup();
-  blink(500);
+  led_setup();
+  led_blink(500);
   delay(250);
-  blink(500);
+  led_blink(500);
   delay(250);
-  led_set(greenLED, HIGH);
+  led_set(GREEN_LED, HIGH);
   delay(250);
-  led_set(greenLED, LOW);
-  led_set(blueLED, HIGH);
+  led_set(GREEN_LED, LOW);
+  led_set(BLUE_LED, HIGH);
   delay(250);
-  led_set(blueLED, LOW);
+  led_set(BLUE_LED, LOW);
 
   // Check the existance of BME280 sensor
   if (bme.begin(0x76)) {
-    bmePresent = 1;
+    bme_present = 1;
   } else {
-    bmePresent = 0;
+    bme_present = 0;
     #if defined(DEBUG_MSG)
       Serial.println("Cound Not Find BME280 Sensor");
     #endif
@@ -124,7 +110,6 @@ void setup() {
       Serial.println(((float)eeprom_word_read(3)) / 100.0, DEC);
     #endif
   }
-  analogReadResolution(12);
 
   #if defined(DEBUG_MSG)
     Serial.println("STM Payload Done Setup");
@@ -132,138 +117,159 @@ void setup() {
 }
 
 void loop() {
+  update_sensors();
 
   // Message handling of raspberry pi zero
-  if (Serial1.available() > 0) {
-    blink(50);
-    char msg = Serial1.read();
+  if (Serial1.available() > 0){
+    
+    char tmp = Serial1.read();
+    led_blink(50);
 
-    if(bmePresent){
-      Serial1.print("OK BME280 ");
-      Serial1.print(bme.readTemperature());
-      Serial1.print(" ");
-      Serial1.print(bme.readPressure() / 100.0F);
-      Serial1.print(" ");
-      Serial1.print(bme.readAltitude(SEALEVELPRESSURE_HPA));
-      Serial1.print(" ");
-      Serial1.print(bme.readHumidity());
-    }else{
-      Serial1.print("OK BME280 0.0 0.0 0.0 0.0");
-    }
-    mpu6050.update();
+    Serial1.print("OK BME280 ");
+    Serial1.print(bme_temperature);
+    Serial1.print(" ");
+    Serial1.print(bme_pressure);
+    Serial1.print(" ");
+    Serial1.print(bme_altitude);
+    Serial1.print(" ");
+    Serial1.print(bme_humidity);
 
     Serial1.print(" MPU6050 ");
-    Serial1.print(mpu6050.getGyroX());
+    Serial1.print(mpu_gyro_x);
     Serial1.print(" ");
-    Serial1.print(mpu6050.getGyroY());
+    Serial1.print(mpu_gyro_y);
     Serial1.print(" ");
-    Serial1.print(mpu6050.getGyroZ());
-
+    Serial1.print(mpu_gyro_z);
     Serial1.print(" ");
-    Serial1.print(mpu6050.getAccX());
+    Serial1.print(mpu_acc_x);
     Serial1.print(" ");
-    Serial1.print(mpu6050.getAccY());
+    Serial1.print(mpu_acc_y);
     Serial1.print(" ");
-    Serial1.print(mpu6050.getAccZ());
-
-    //Temp = T1 + (read_analog() - R1) * ((T2 - T1) / (R2 - R1));
-    Sensor2 = analogRead(PA4) * 3.3 / 4095;
+    Serial1.print(mpu_acc_z);
 
     Serial1.print(" XS ");
-    Serial1.print(Temp/10);
+    Serial1.print(diode_temp);
     Serial1.print(" ");
-    Serial1.println(Sensor2);
-
-    float rotation = sqrt(mpu6050.getGyroX() * mpu6050.getGyroX() + mpu6050.getGyroY() * mpu6050.getGyroY() + mpu6050.getGyroZ() * mpu6050.getGyroZ());
-    float acceleration = sqrt(mpu6050.getAccX() * mpu6050.getAccX() + mpu6050.getAccY() * mpu6050.getAccY() + mpu6050.getAccZ() * mpu6050.getAccZ());
-
-    if (first_read == true) {
-      first_read = false;
-      rest = acceleration;
-    }
-
-    if (acceleration > 1.2 * rest)
-      led_set(greenLED, HIGH);
-    else
-      led_set(greenLED, LOW);
-
-    if (rotation > 5)
-      led_set(blueLED, HIGH);
-    else
-      led_set(blueLED, LOW);
+    Serial1.println(voltage);
   }
 
   // Message handling of uart though USB-C
   if(Serial.available() > 0){
-    blink(50);
+    
     char msg = Serial.read();
+    led_blink(50);
 
     if(msg == 'R'){
       #if defined(DEBUG_MSG)
         Serial.println("System Restart");
       #endif
-
       delay(500);
-      first_read = true;
       setup();
 
     }else if(msg == 'C'){
       #if defined(DEBUG_MSG)
         Serial.println("Clear gyro offsets");
       #endif
-
       delay(500);
-      first_time = true;
       eeprom_word_write(0, 0x00);
       setup();
-    }
-
-    if(msg == '?'){
-      if(bmePresent){
-        Serial.print("OK BME280 ");
-        Serial.print(bme.readTemperature());
-        Serial.print(" ");
-        Serial.print(bme.readPressure() / 100.0F);
-        Serial.print(" ");
-        Serial.print(bme.readAltitude(SEALEVELPRESSURE_HPA));
-        Serial.print(" ");
-        Serial.print(bme.readHumidity());
-      }else{
-        Serial.print("OK BME280 0.0 0.0 0.0 0.0");
-      }
-
-      mpu6050.update();
-      Serial.print(" MPU6050 ");
-      Serial.print(mpu6050.getGyroX());
-      Serial.print(" ");
-      Serial.print(mpu6050.getGyroY());
-      Serial.print(" ");
-      Serial.print(mpu6050.getGyroZ());
-
-      Serial.print(" ");
-      Serial.print(mpu6050.getAccX());
-      Serial.print(" ");
-      Serial.print(mpu6050.getAccY());
-      Serial.print(" ");
-      Serial.print(mpu6050.getAccZ());
-
-      //Temp = T1 + (read_analog() - R1) * ((T2 - T1) / (R2 - R1));
-      //Temp = (analogRead(PA7));
-      Sensor2 = analogRead(PA4) * 3.3 / 4095;
-
-      Serial.print(" XS ");
-      Serial.print(Temp/10);
-      Serial.print(" ");
-      #if defined(DEBUG_MSG)
-        Serial.print(read_analog());
-        Serial.print(" ");
-      #endif
       
-      Serial.println(Sensor2);
+    }else if(msg == '?'){
+      #if defined(DEBUG_MSG)
+        Serial.print("OK BME280 ");
+        Serial.print(bme_temperature);
+        Serial.print(" ");
+        Serial.print(bme_pressure);
+        Serial.print(" ");
+        Serial.print(bme_altitude);
+        Serial.print(" ");
+        Serial.print(bme_humidity);
+
+        Serial.print(" MPU6050 ");
+        Serial.print(mpu_gyro_x);
+        Serial.print(" ");
+        Serial.print(mpu_gyro_y);
+        Serial.print(" ");
+        Serial.print(mpu_gyro_z);
+        Serial.print(" ");
+        Serial.print(mpu_acc_x);
+        Serial.print(" ");
+        Serial.print(mpu_acc_y);
+        Serial.print(" ");
+        Serial.print(mpu_acc_z);
+
+        Serial.print(" XS ");
+        Serial.print(diode_temp);
+        Serial.print(" ");
+        Serial.println(voltage);
+      #else
+        Serial.write(0xFF);
+        Serial.write((byte *) &bme_temperature, 4);
+        Serial.write((byte *) &bme_pressure, 4);
+        Serial.write((byte *) &bme_altitude, 4);
+        Serial.write((byte *) &bme_humidity, 4);
+        Serial.write((byte *) &mpu_gyro_x, 4);
+        Serial.write((byte *) &mpu_gyro_y, 4);
+        Serial.write((byte *) &mpu_gyro_z, 4);
+        Serial.write((byte *) &mpu_acc_x, 4);
+        Serial.write((byte *) &mpu_acc_y, 4);
+        Serial.write((byte *) &mpu_acc_z, 4);
+        Serial.write((byte *) &diode_temp, 4);
+        Serial.write((byte *) &voltage, 4);
+      #endif
     }
   }
-  temp_avg();
-  delay(100);
+
+  delay(50);
+}
+
+void update_sensors(){
+
+  bme_temperature = bme_present ? bme.readTemperature() : 0.0;
+  bme_pressure = bme_present ? bme.readPressure() / 100.0 : 0.0;
+  bme_altitude = bme_present ? bme.readAltitude(SEA_LEVEL_PRESSURE) : 0.0;
+  bme_humidity = bme_present ? bme.readHumidity() : 0.0;
+
+  static float diode_temp_buf[10] = {0.0};
+  static uint8_t diode_temp_buf_index = 0;
+  static float diode_temp_sum = 0.0;
+
+  diode_temp_sum -= diode_temp_buf[diode_temp_buf_index];
+  diode_temp_buf[diode_temp_buf_index] = T1 + (analogRead(PA7) - R1) * ((T2 - T1) / (R2 - R1));
+  diode_temp_sum += diode_temp_buf[diode_temp_buf_index];
+  diode_temp_buf_index = (diode_temp_buf_index + 1) % 10;
+  diode_temp = diode_temp_sum / 10.0;
+  
+  voltage = analogRead(PA4) * 3.3 / 4096;
+
+  mpu6050.update();
+  mpu_gyro_x = mpu6050.getGyroX();
+  mpu_gyro_y = mpu6050.getGyroY();
+  mpu_gyro_z = mpu6050.getGyroZ();
+  mpu_acc_x = mpu6050.getAccX();
+  mpu_acc_y = mpu6050.getAccY();
+  mpu_acc_z = mpu6050.getAccZ();
+
+}
+
+void led_setup(){
+  pinMode(PC13, OUTPUT);
+  pinMode(PB9, OUTPUT);
+  pinMode(PB8, OUTPUT);
+}
+
+void led_blink(int length){
+  digitalWrite(PC13, LOW);
+  delay(length);
+  digitalWrite(PC13, HIGH);
+}
+
+void led_set(int led_pin, bool state){
+  if(led_pin == GREEN_LED){
+    digitalWrite(PB9, state);
+  }else if(led_pin == BLUE_LED){
+    digitalWrite(PB8, state);
+  }
 }
 
 void eeprom_word_write(int addr, int val){
@@ -273,80 +279,4 @@ void eeprom_word_write(int addr, int val){
 
 short eeprom_word_read(int addr){
   return ((EEPROM.read(addr * 2 + 1) << 8) | EEPROM.read(addr * 2));
-}
-
-void blink_setup(){
-//#if defined(ARDUINO_ARCH_STM32F0) || defined(ARDUINO_ARCH_STM32F1) || defined(ARDUINO_ARCH_STM32F3) || defined(ARDUINO_ARCH_STM32F4) || defined(ARDUINO_ARCH_STM32L4)
-#if defined(STM32F0) || defined(STM32F1) || defined(STM32F3) || defined(STM32F4) || defined(STM32L4)
-  // initialize digital pin PB1 as an output.
-  pinMode(PC13, OUTPUT);
-  pinMode(PB9, OUTPUT);
-  pinMode(PB8, OUTPUT);
-#endif
-
-#if defined __AVR_ATmega32U4__
-  pinMode(RXLED, OUTPUT);  // Set RX LED as an output
-  // TX LED is set as an output behind the scenes
-  pinMode(greenLED, OUTPUT);
-  pinMode(blueLED, OUTPUT);
-#endif
-}
-
-void blink(int length){
-//#if defined(ARDUINO_ARCH_STM32F0) || defined(ARDUINO_ARCH_STM32F1) || defined(ARDUINO_ARCH_STM32F3) || defined(ARDUINO_ARCH_STM32F4) || defined(ARDUINO_ARCH_STM32L4)
-#if defined(STM32F0) || defined(STM32F1) || defined(STM32F3) || defined(STM32F4) || defined(STM32L4)
-  digitalWrite(PC13, LOW);  // turn the LED on (HIGH is the voltage level)
-#endif
-
-#if defined __AVR_ATmega32U4__
-  digitalWrite(RXLED, LOW);  // set the RX LED ON
-  TXLED0;                    //TX LED is not tied to a normally controlled pin so a macro is needed, turn LED OFF
-#endif
-
-  delay(length);  // wait for a lenth of time
-
-//#if defined(ARDUINO_ARCH_STM32F0) || defined(ARDUINO_ARCH_STM32F1) || defined(ARDUINO_ARCH_STM32F3) || defined(ARDUINO_ARCH_STM32F4) || defined(ARDUINO_ARCH_STM32L4)
-#if defined(STM32F0) || defined(STM32F1) || defined(STM32F3) || defined(STM32F4) || defined(STM32L4)
-  digitalWrite(PC13, HIGH);  // turn the LED off by making the voltage LOW
-#endif
-
-#if defined __AVR_ATmega32U4__
-  digitalWrite(RXLED, HIGH);  // set the RX LED OFF
-  TXLED0;                     //TX LED macro to turn LED ON
-#endif
-}
-
-void led_set(int ledPin, bool state){
-//#if defined(ARDUINO_ARCH_STM32F0) || defined(ARDUINO_ARCH_STM32F1) || defined(ARDUINO_ARCH_STM32F3) || defined(ARDUINO_ARCH_STM32F4) || defined(ARDUINO_ARCH_STM32L4)
-#if defined(STM32F0) || defined(STM32F1) || defined(STM32F3) || defined(STM32F4) || defined(STM32L4)
-  if (ledPin == greenLED)
-    digitalWrite(PB9, state);
-  else if (ledPin == blueLED)
-    digitalWrite(PB8, state);
-#endif
-
-#if defined __AVR_ATmega32U4__
-  digitalWrite(ledPin, state);
-#endif
-}
-
-int read_analog(){
-  int sensorValue;
-#if defined __AVR_ATmega32U4__
-  sensorValue = analogRead(A3);
-#endif
-//#if defined(ARDUINO_ARCH_STM32F0) || defined(ARDUINO_ARCH_STM32F1) || defined(ARDUINO_ARCH_STM32F3) || defined(ARDUINO_ARCH_STM32F4) || defined(ARDUINO_ARCH_STM32L4)
-#if defined(STM32F0) || defined(STM32F1) || defined(STM32F3) || defined(STM32F4) || defined(STM32L4)
-  sensorValue = analogRead(PA7);
-#endif
-  return (sensorValue);
-}
-
-void temp_avg(){
-  temps[10] = T1 + (read_analog() - R1) * ((T2 - T1) / (R2 - R1));
-  //temps[10] = read_analog();
-  Temp +=(temps[10]-temps[0]);
-  for(uint8_t i =0;i<10;i++)
-    temps[i]=temps[i+1];
-  
 }
