@@ -4,12 +4,12 @@
 #include <MPU6050_tockn.h>
 #include <EEPROM.h>
 
-//#define DEBUG_MSG
+//#define DEBUG_MSG 1
 
 #define RX_LED 17
 #define BLUE_LED 8
 #define GREEN_LED 9
-#define SEA_LEVEL_PRESSURE 1013.25
+#define SEA_LEVEL_PRESSURE 1022.5
 
 #define T2  25.9  // Temperature data point 1
 #define R2  661.0 // Reading data point 1
@@ -123,7 +123,6 @@ void loop() {
   if (Serial1.available() > 0){
     
     char tmp = Serial1.read();
-    led_blink(50);
 
     Serial1.print("OK BME280 ");
     Serial1.print(bme_temperature);
@@ -151,13 +150,16 @@ void loop() {
     Serial1.print(diode_temp);
     Serial1.print(" ");
     Serial1.println(voltage);
+
+    led_set(BLUE_LED, 1);
+    delay(50);
+    led_set(BLUE_LED, 0);
   }
 
   // Message handling of uart though USB-C
   if(Serial.available() > 0){
     
     char msg = Serial.read();
-    led_blink(50);
 
     if(msg == 'R'){
       #if defined(DEBUG_MSG)
@@ -216,8 +218,14 @@ void loop() {
         Serial.write((byte *) &mpu_acc_z, 4);
         Serial.write((byte *) &diode_temp, 4);
         Serial.write((byte *) &voltage, 4);
+        Serial.write('\n');
       #endif
     }
+
+    led_set(GREEN_LED, 1);
+    delay(50);
+    led_set(GREEN_LED, 0);
+
   }
 
   delay(50);
